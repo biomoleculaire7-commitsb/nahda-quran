@@ -30,8 +30,28 @@ export default async function handler(req, res) {
     return res.json({ ok: true, room, ...r, students: ids.length });
   }
 
+  // لوحة العرض: الآيات المعروضة والآية الحالية
+  if (action === 'board') {
+    const s = parseInt(req.body.surah, 10), f = parseInt(req.body.from, 10);
+    const t = parseInt(req.body.to, 10) || f;
+    const c = parseInt(req.body.current, 10) || f;
+    if (!(s >= 1 && s <= 114) || !(f >= 1) || t < f || t - f > 60 || c < f || c > t)
+      return fail(res, 400, 'تحقق من السورة وأرقام الآيات (60 آية كحد أقصى)');
+    await db.from('teachers').update({
+      board_surah: s, board_from: f, board_to: t, board_current: c, board_updated_at: new Date().toISOString()
+    }).eq('id', teacher.id);
+    return res.json({ ok: true });
+  }
+
+  if (action === 'board_clear') {
+    await db.from('teachers').update({ board_surah: null, board_from: null, board_to: null, board_current: null,
+      board_updated_at: new Date().toISOString() }).eq('id', teacher.id);
+    return res.json({ ok: true });
+  }
+
   if (action === 'end') {
-    await db.from('teachers').update({ live_room: null, live_started_at: null }).eq('id', teacher.id);
+    await db.from('teachers').update({ live_room: null, live_started_at: null,
+      board_surah: null, board_from: null, board_to: null, board_current: null }).eq('id', teacher.id);
     return res.json({ ok: true });
   }
 
