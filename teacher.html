@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>صفحة الأستاذ — مدرسة النهضة بالقرآن</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<meta name="theme-color" content="#6c0031">
+</head>
+<body>
+<header>
+  <img src="logo.png" alt="شعار مدرسة النهضة بالقرآن" class="logo">
+  <h1>صفحة الأستاذ</h1>
+  <p>مدرسة النهضة بالقرآن</p>
+</header>
+
+<main>
+  <section id="loginBox" class="card">
+    <h2>الدخول</h2>
+    <label>رمز الأستاذ (8 حروف وأرقام من المدير)</label>
+    <input id="passInput" type="password" autocapitalize="characters" maxlength="8" style="text-transform:uppercase">
+    <button class="full" id="loginBtn">دخول</button>
+    <div id="loginMsg"></div>
+  </section>
+
+  <section id="app" class="hidden">
+    <div class="card"><div class="row" style="align-items:center">
+      <div>السلام عليكم يا <b id="teacherName"></b></div>
+      <button class="secondary" id="logoutBtn" style="flex:0">خروج</button></div></div>
+    <div class="tabs">
+      <button data-tab="pending" class="active">بانتظار التصحيح</button>
+      <button data-tab="done">المصحَّحة</button>
+      <button data-tab="students">التلاميذ</button>
+    </div>
+
+    <div id="recList"></div>
+
+    <div id="studentsBox" class="hidden">
+      <div class="card">
+        <h2>إضافة تلميذ</h2>
+        <div class="row">
+          <input id="newName" placeholder="اسم التلميذ">
+          <button id="addBtn" style="flex:0">إضافة</button>
+        </div>
+        <p class="hint">يحصل كل تلميذ على رمز من 6 أرقام يدخل به. أعطيه الرمز مكتوبًا على ورقة.</p>
+        <div id="addMsg"></div>
+      </div>
+      <div class="card"><h2>قائمة التلاميذ</h2><div id="studentList"></div></div>
+    </div>
+
+  </section>
+</main>
+
+<script src="common.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let pass = "";
+try { pass = sessionStorage.getItem("nq_tcode") || ""; } catch (e) {}
+let tab = "pending";
+const TAGS = ["غنّة", "مدّ", "قلقلة", "إخفاء", "إدغام", "إقلاب", "ترقيق الراء", "تفخيم", "مخارج الحروف", "خطأ في الحفظ", "الوقف والابتداء"];
+
+const tApi = (path, opts = {}) => api(path, { ...opts, headers: { "x-teacher-code": pass } });
+
+async function login(p) {
+  pass = p.trim().toUpperCase();
+  try {
+    const me = await tApi("/api/me");
+    $("teacherName").textContent = me.name;
+    try { sessionStorage.setItem("nq_tcode", pass); } catch (e) {}
+    $("loginBox").classList.add("hidden"); $("app").classList.remove("hidden");
+    show(tab);
+  } catch (e) {
+    $("loginMsg").innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
+  }
+}
+$("loginBtn").onclick = () => login($("passInput").value);
+$("passInput").onkeydown = e => { if (e.key === "Enter") $("loginBtn").click(); };
+$("logoutBtn").onclick = () => { try { sessionStorage.removeItem("nq_tcode"); } catch (e) {} location.reload(); };
+if (pass) login(pass);
+
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".tabs button").forEach(x => x.classList.remove("active"));
+  b.classList.add("active"); show(b.dataset.tab);
+});
+
+function show(t) {
+  tab = t;
+  $("recList").classList.toggle("hidden", t === "students");
+  $("studentsBox").classList.toggle("hidden", t !== "students");
+  if (t === "students") loadStudents(); else loadRecs(t === "pending" ? "pending" : "done");
+}
+
+// ---------- التسجيلات ----------
+async function loadRecs(status) {
+  $("recList").innerHTML = `<div class="card hint">جارٍ التحميل…</div>`;
+  try {
+    const list = await tApi(`/api/recordings?status=${status}`);
+    if (!list.length) {
+      $("recList").innerHTML = `<div class="card hint">${status === "pending" ? "لا توجد تسجيلات جديدة 🌿" : "لا شيء بعد."}</div>`;
+      return;
+    }
+    $("recList").innerHTML = list.map(r => `
+      <div class="card" id="r-${r.id}">
+        <b>${esc(r.student || "تلميذ")}</b> — ${esc(surahLabel(r))}
+        <div class="hint">${new Date(r.created_at).toLocaleString("ar-DZ")}
+          ${r.status !== "pending" ? ` · <span style="color:${STATUS[r.status][1]}">${STATUS[r.status][0]}</span>` : ""}</div>
+        <audio controls preload="none" src="${esc(r.url || "")}"></audio>
+        <label>ملاحظة للتلميذ</label>
+        <textarea data-note="${r.id}">${esc(r.note || "")}</textarea>
+        <div class="tags">${TAGS.map(t => `<button data-tag="${r.id}">${t}</button>`).join("")}</div>
+        <div class="row" style="margin-top:10px">
+          <button data-ok="${r.id}">صحيحة ✓</button>
+          <button class="danger" data-redo="${r.id}">تحتاج إعادة</button>
+        </div>
+      </div>`).join("");
+  } catch (e) {
+    $("recList").innerHTML = `<div class="card msg err">${esc(e.message)}</div>`;
+  }
+}
+
+$("recList").addEventListener("click", async e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.tag) {
+    const ta = document.querySelector(`[data-note="${b.dataset.tag}"]`);
+    ta.value = (ta.value ? ta.value.trim() + "، " : "") + b.textContent;
+    return;
+  }
+  const id = b.dataset.ok || b.dataset.redo;
+  if (!id) return;
+  const status = b.dataset.ok ? "ok" : "redo";
+  const note = document.querySelector(`[data-note="${id}"]`).value;
+  b.disabled = true;
+  try {
+    await tApi("/api/review", { method: "POST", body: { id, status, note } });
+    const card = $(`r-${id}`);
+    if (tab === "pending") card.remove();
+    else card.querySelector(".hint").insertAdjacentHTML("beforeend", " · ✓ حُفظ");
+    if (tab === "pending" && !document.querySelector("#recList .card[id]"))
+      $("recList").innerHTML = `<div class="card hint">لا توجد تسجيلات جديدة 🌿</div>`;
+  } catch (err) { alert(err.message); b.disabled = false; }
+});
+
+// ---------- التلاميذ ----------
+async function loadStudents() {
+  $("studentList").innerHTML = `<p class="hint">جارٍ التحميل…</p>`;
+  try {
+    const list = await tApi("/api/students");
+    $("studentList").innerHTML = list.length ? list.map(s => `
+      <div class="item row" style="align-items:center">
+        <div>${esc(s.name)}<br><span class="code">${esc(s.code)}</span></div>
+        <button class="danger" style="flex:0" data-del="${s.id}" data-name="${esc(s.name)}">حذف</button>
+      </div>`).join("") : `<p class="hint">لم يُضَف أي تلميذ بعد.</p>`;
+  } catch (e) { $("studentList").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+}
+
+$("addBtn").onclick = async () => {
+  const name = $("newName").value.trim(); if (!name) return;
+  $("addBtn").disabled = true;
+  try {
+    const s = await tApi("/api/students", { method: "POST", body: { name } });
+    $("addMsg").innerHTML = `<div class="msg ok">رمز ${esc(s.name)}: <span class="code">${esc(s.code)}</span></div>`;
+    $("newName").value = ""; loadStudents();
+  } catch (e) { $("addMsg").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+  $("addBtn").disabled = false;
+};
+$("newName").onkeydown = e => { if (e.key === "Enter") $("addBtn").click(); };
+
+$("studentList").addEventListener("click", async e => {
+  const b = e.target.closest("[data-del]"); if (!b) return;
+  if (!confirm(`حذف ${b.dataset.name} وكل تسجيلاته؟`)) return;
+  try { await tApi(`/api/students?id=${b.dataset.del}`, { method: "DELETE" }); loadStudents(); }
+  catch (err) { alert(err.message); }
+});
+</script>
+</body>
+</html>

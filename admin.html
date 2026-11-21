@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>صفحة المدير — مدرسة النهضة بالقرآن</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="icon.png">
+<meta name="theme-color" content="#6c0031">
+</head>
+<body>
+<header>
+  <img src="logo.png" alt="شعار مدرسة النهضة بالقرآن" class="logo">
+  <h1>صفحة المدير</h1>
+  <p>إدارة الأساتذة</p>
+</header>
+
+<main>
+  <section id="loginBox" class="card">
+    <h2>الدخول</h2>
+    <label>كلمة سر المدير</label>
+    <input id="passInput" type="password">
+    <button class="full" id="loginBtn">دخول</button>
+    <div id="loginMsg"></div>
+  </section>
+
+  <section id="app" class="hidden">
+    <div class="card">
+      <h2>إضافة أستاذ</h2>
+      <div class="row">
+        <input id="newName" placeholder="اسم الأستاذ أو الأستاذة">
+        <button id="addBtn" style="flex:0">إضافة</button>
+      </div>
+      <p class="hint">يحصل كل أستاذ على رمز دخول من 8 حروف وأرقام. <b>الرمز يظهر مرة واحدة فقط</b>، فانسخه وأعطه للأستاذ. إذا نسيه اضغط «رمز جديد».</p>
+      <div id="codeMsg"></div>
+    </div>
+
+    <div class="card">
+      <h2>الأساتذة</h2>
+      <div id="list"></div>
+    </div>
+
+    <button class="secondary full" id="logoutBtn">خروج</button>
+  </section>
+</main>
+
+<script src="common.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let pass = "";
+try { pass = sessionStorage.getItem("nq_admin") || ""; } catch (e) {}
+const aApi = (path, opts = {}) => api(path, { ...opts, headers: { "x-admin-password": pass } });
+
+async function login(p) {
+  pass = p;
+  try {
+    await loadList();
+    try { sessionStorage.setItem("nq_admin", p); } catch (e) {}
+    $("loginBox").classList.add("hidden"); $("app").classList.remove("hidden");
+  } catch (e) {
+    $("loginMsg").innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
+  }
+}
+$("loginBtn").onclick = () => login($("passInput").value);
+$("passInput").onkeydown = e => { if (e.key === "Enter") $("loginBtn").click(); };
+$("logoutBtn").onclick = () => { try { sessionStorage.removeItem("nq_admin"); } catch (e) {} location.reload(); };
+if (pass) login(pass);
+
+function showCode(t) {
+  $("codeMsg").innerHTML = `<div class="msg ok">رمز ${esc(t.name)}: <span class="code">${esc(t.code)}</span>
+    <br><span class="hint">انسخه الآن، لن يظهر مرة أخرى.</span></div>`;
+  $("codeMsg").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+async function loadList() {
+  const list = await aApi("/api/teachers");
+  $("list").innerHTML = list.length ? list.map(t => `
+    <div class="item row" style="align-items:center">
+      <div>${esc(t.name)}<br><span class="hint">${t.students} تلميذ</span></div>
+      <button class="secondary" style="flex:0;white-space:nowrap" data-reset="${t.id}">رمز جديد</button>
+      <button class="danger" style="flex:0" data-del="${t.id}" data-name="${esc(t.name)}">حذف</button>
+    </div>`).join("") : `<p class="hint">لم يُضَف أي أستاذ بعد.</p>`;
+}
+
+$("addBtn").onclick = async () => {
+  const name = $("newName").value.trim(); if (!name) return;
+  $("addBtn").disabled = true;
+  try { showCode(await aApi("/api/teachers", { method: "POST", body: { name } })); $("newName").value = ""; await loadList(); }
+  catch (e) { $("codeMsg").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+  $("addBtn").disabled = false;
+};
+$("newName").onkeydown = e => { if (e.key === "Enter") $("addBtn").click(); };
+
+$("list").addEventListener("click", async e => {
+  const b = e.target.closest("button"); if (!b) return;
+  try {
+    if (b.dataset.reset) {
+      if (!confirm("إنشاء رمز جديد؟ الرمز القديم سيتوقف عن العمل.")) return;
+      showCode(await aApi(`/api/teachers?id=${b.dataset.reset}`, { method: "PATCH" }));
+    } else if (b.dataset.del) {
+      if (!confirm(`حذف ${b.dataset.name}؟ سيُحذف معه كل تلاميذه وتسجيلاتهم نهائيًا.`)) return;
+      await aApi(`/api/teachers?id=${b.dataset.del}`, { method: "DELETE" });
+      await loadList();
+    }
+  } catch (err) { alert(err.message); }
+});
+</script>
+</body>
+</html>
