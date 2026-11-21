@@ -29,6 +29,27 @@ export default async function handler(req, res) {
     return res.json({ ok: true });
   }
 
+  // ---------- الحذف: التلميذ يحذف تسجيله، والأستاذ يحذف تسجيلات تلاميذه ----------
+  if (req.method === 'DELETE') {
+    const id = req.query.id;
+    let q = db.from('recordings').select('id,audio_path,students!inner(teacher_id)').eq('id', id);
+    if (req.headers['x-teacher-code']) {
+      const teacher = await authTeacher(req, res);
+      if (!teacher) return;
+      q = q.eq('students.teacher_id', teacher.id);
+    } else {
+      const student = await authStudent(req, res, req.query.code);
+      if (!student) return;
+      q = q.eq('student_id', student.id);
+    }
+    const { data: rec } = await q.maybeSingle();
+    if (!rec) return fail(res, 404, 'التسجيل غير موجود');
+    await db.storage.from(BUCKET).remove([rec.audio_path]);
+    const { error } = await db.from('recordings').delete().eq('id', rec.id);
+    if (error) return fail(res, 500, error.message);
+    return res.json({ ok: true });
+  }
+
   if (req.method !== 'GET') return fail(res, 405, 'Method not allowed');
 
   // ---------- الأستاذ: تسجيلات تلاميذه فقط ----------
