@@ -21,8 +21,17 @@ async function api(path, { method = "GET", body, headers = {} } = {}) {
     method, headers: { "Content-Type": "application/json", ...headers },
     body: body ? JSON.stringify(body) : undefined
   });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || "حدث خطأ، حاول مرة أخرى");
+  const raw = await r.text();
+  let data = {};
+  try { data = raw ? JSON.parse(raw) : {}; } catch (e) {}
+  if (!r.ok) {
+    if (data.error) throw new Error(data.error);
+    // رسالة تشخيص: رقم الخطأ وبداية رد الخادم
+    const hint = r.status === 404 ? "الملف غير موجود على الخادم (لم يُرفع أو لم يُنشر)"
+               : r.status === 413 ? "التسجيل أكبر من المسموح، سجّل مدة أقصر"
+               : raw.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
+    throw new Error(`حدث خطأ (${r.status}): ${hint}`);
+  }
   return data;
 }
 
@@ -47,3 +56,27 @@ async function warshAyat(surah, from, to) {
   return all.filter(v => v.n >= from && v.n <= (to || from));
 }
 const toArabicDigits = n => String(n).replace(/\d/g, d => "٠١٢٣٤٥٦٧٨٩"[d]);
+
+// ---------- الحصة المباشرة ----------
+function jitsiUrl(room, name) {
+  return `https://meet.jit.si/${encodeURIComponent(room)}#userInfo.displayName=${encodeURIComponent(JSON.stringify(name || ""))}`;
+}
+const dot = on => `<span class="dot${on ? " on" : ""}"></span>`;
+function timeAgo(ts) {
+  if (!ts) return "";
+  const m = Math.round((Date.now() - new Date(ts).getTime()) / 60000);
+  if (m < 1) return "الآن";
+  if (m < 60) return `منذ ${m} دقيقة`;
+  const h = Math.round(m / 60);
+  return h < 24 ? `منذ ${h} ساعة` : new Date(ts).toLocaleDateString("ar-DZ");
+}
+
+// نبضة كل 30 ثانية ما دامت الصفحة ظاهرة
+function startHeartbeat(fn, every = 30000) {
+  let timer = null;
+  const run = () => { if (document.visibilityState === "visible") fn(); };
+  run();
+  timer = setInterval(run, every);
+  document.addEventListener("visibilitychange", run);
+  return () => clearInterval(timer);
+}

@@ -7,6 +7,9 @@
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="icon.png">
 <link rel="apple-touch-icon" href="icon.png">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="النهضة بالقرآن">
 <meta name="theme-color" content="#6c0031">
 </head>
 <body>
@@ -34,6 +37,15 @@
         <div>السلام عليكم يا <b id="studentName"></b><div class="hint" id="teacherLine"></div></div>
         <button class="secondary" id="logoutBtn" style="flex:0">خروج</button>
       </div>
+    </div>
+
+    <!-- الحصة المباشرة -->
+    <div class="card" id="liveCard">
+      <h2>الحصة المباشرة</h2>
+      <div id="teacherStatus" class="hint">…</div>
+      <div id="announceBox"></div>
+      <div id="liveBox"></div>
+      <div id="pushBox" style="margin-top:12px"></div>
     </div>
 
     <!-- الواجبات -->
@@ -85,6 +97,7 @@ const $ = id => document.getElementById(id);
 const MAX_SECONDS = 180;
 let code = store("nq_code");
 let recorder, chunks = [], blob = null, mime = "", tick, seconds = 0;
+let liveStarted = false, lastLiveRoom = null;
 
 $("surah").innerHTML = SURAHS.map((n, i) => `<option value="${i + 1}">${i + 1}. ${n}</option>`).join("");
 
@@ -100,6 +113,7 @@ async function login(c) {
     $("app").classList.remove("hidden");
     loadAssignments();
     loadMine();
+    startLive();
   } catch (e) {
     if (!/انتظر/.test(e.message)) store("nq_code", null);
     $("loginMsg").innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
@@ -107,7 +121,14 @@ async function login(c) {
 }
 $("loginBtn").onclick = () => login($("codeInput").value.trim());
 $("codeInput").onkeydown = e => { if (e.key === "Enter") $("loginBtn").click(); };
-$("logoutBtn").onclick = () => { store("nq_code", null); location.reload(); };
+$("logoutBtn").onclick = async () => {
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    const sub = await reg?.pushManager?.getSubscription();
+    if (sub) { await api("/api/push", { method: "DELETE", body: { code, endpoint: sub.endpoint } }); await sub.unsubscribe(); }
+  } catch (e) {}
+  store("nq_code", null); location.reload();
+};
 if (code) login(code);
 
 // ---------- التسجيل ----------
@@ -213,6 +234,83 @@ $("myList").addEventListener("click", async e => {
     loadMine();
   } catch (err) { alert(err.message); b.disabled = false; }
 });
+
+// ---------- الحصة المباشرة + من المتصل ----------
+function startLive() {
+  if (liveStarted) return; liveStarted = true;
+  startHeartbeat(ping);
+  setupPush();
+  if (new URLSearchParams(location.search).has("live"))
+    setTimeout(() => $("liveCard").scrollIntoView({ behavior: "smooth" }), 400);
+}
+
+async function ping() {
+  try {
+    const d = await api("/api/ping", { method: "POST", body: { code } });
+    $("teacherStatus").innerHTML = `${dot(d.teacher.online)} ${esc(d.teacher.name)} — ${d.teacher.online ? "<b style='color:#22a447'>متصل الآن</b>" : "غير متصل"}`;
+    $("announceBox").innerHTML = d.announcement
+      ? `<div class="announce">📢 ${esc(d.announcement)}<div class="hint">${timeAgo(d.announced_at)}</div></div>` : "";
+    if (d.live) {
+      $("liveBox").innerHTML = `<div class="live-box"><b>🔴 الحصة بدأت الآن</b>
+        <div class="hint">انتظر حتى يسمح لك الأستاذ بالدخول</div>
+        <button class="live-btn" id="joinBtn">انضم إلى الحصة</button></div>`;
+      $("joinBtn").onclick = () => window.open(jitsiUrl(d.live.room, d.me), "_blank");
+      if (lastLiveRoom !== d.live.room && lastLiveRoom !== null) $("liveCard").scrollIntoView({ behavior: "smooth" });
+      lastLiveRoom = d.live.room;
+    } else {
+      $("liveBox").innerHTML = ""; lastLiveRoom = "";
+    }
+  } catch (e) {
+    $("teacherStatus").textContent = e.message;
+  }
+}
+
+// ---------- الإشعارات ----------
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+const isStandalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+
+function urlB64ToUint8Array(b64) {
+  const pad = "=".repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+async function setupPush() {
+  const box = $("pushBox");
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+    box.innerHTML = isIOS && !isStandalone
+      ? `<div class="announce">🔔 لتصلك التنبيهات على الآيفون: اضغط زر <b>المشاركة</b> ⬆️ ثم <b>«إضافة إلى الشاشة الرئيسية»</b>، وافتح الموقع من الأيقونة الجديدة ثم ادخل برمزك.</div>`
+      : `<p class="hint">هذا المتصفح لا يدعم التنبيهات.</p>`;
+    return;
+  }
+  let reg;
+  try { reg = await navigator.serviceWorker.register("/sw.js"); } catch (e) { box.innerHTML = ""; return; }
+  const sub = await reg.pushManager.getSubscription();
+  if (sub && Notification.permission === "granted") {
+    // نعيد إرسال الاشتراك (قد يكون تغيّر)
+    api("/api/push", { method: "POST", body: { code, subscription: sub.toJSON() } }).catch(() => {});
+    box.innerHTML = `<p class="hint">🔔 التنبيهات مفعّلة على هذا الجهاز.</p>`;
+    return;
+  }
+  if (Notification.permission === "denied") {
+    box.innerHTML = `<p class="hint">🔕 التنبيهات ممنوعة في إعدادات المتصفح. فعّلها من إعدادات الموقع ثم أعد فتح الصفحة.</p>`;
+    return;
+  }
+  box.innerHTML = `<button class="secondary full" id="pushBtn">🔔 فعّل التنبيهات لتعرف موعد الحصة</button>`;
+  $("pushBtn").onclick = async () => {
+    $("pushBtn").disabled = true;
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") throw new Error("لم تسمح بالتنبيهات");
+      const { publicKey } = await api("/api/push");
+      const s = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8Array(publicKey) });
+      await api("/api/push", { method: "POST", body: { code, subscription: s.toJSON() } });
+      box.innerHTML = `<p class="hint">🔔 تم! ستصلك التنبيهات على هذا الجهاز.</p>`;
+    } catch (e) {
+      box.innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
+    }
+  };
+}
 
 // ---------- الواجبات ----------
 let assignments = [];

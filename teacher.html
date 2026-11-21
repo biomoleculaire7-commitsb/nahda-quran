@@ -34,10 +34,38 @@
       <button data-tab="pending" class="active">بانتظار التصحيح</button>
       <button data-tab="done">المصحَّحة</button>
       <button data-tab="assign">الواجبات</button>
+      <button data-tab="live">المباشر <span id="onlineCount" class="pill" style="background:#fff;color:#22a447"></span></button>
       <button data-tab="students">التلاميذ</button>
     </div>
 
     <div id="recList"></div>
+
+    <div id="liveTab" class="hidden">
+      <div class="card">
+        <h2>الحصة المباشرة</h2>
+        <div id="liveState"></div>
+        <p class="hint" style="margin-top:12px">أول مرة: عند فتح الحصة يطلب Jitsi تسجيل دخولك بحساب Google لتكون أنت <b>المشرف</b>. التلاميذ لا يحتاجون حسابًا، وينتظرون حتى تدخل أنت.
+        للأمان: من إعدادات الغرفة في Jitsi فعّل <b>«غرفة الانتظار» (Lobby)</b> لتقبل كل تلميذ بنفسك.</p>
+      </div>
+      <div class="card">
+        <h2>إعلام التلاميذ بموعد</h2>
+        <textarea id="announceText" placeholder="مثال: الحصة المباشرة اليوم على الساعة 18:00 إن شاء الله، حضّروا سورة الملك"></textarea>
+        <div class="row" style="margin-top:10px">
+          <button id="announceBtn">📢 إرسال الإعلان</button>
+          <button class="secondary" id="clearAnnBtn" style="flex:0;white-space:nowrap">مسح الإعلان</button>
+        </div>
+        <div id="announceMsg"></div>
+        <div id="currentAnn"></div>
+      </div>
+      <div class="card">
+        <div class="row" style="align-items:center">
+          <h2 style="margin:0">تلاميذي الآن</h2>
+          <span class="hint" style="flex:0;white-space:nowrap" id="onlineSummary"></span>
+        </div>
+        <p class="hint">🟢 متصل الآن · 🔔 فعّل التنبيهات · 🔕 لم يفعّلها بعد</p>
+        <div id="presenceList"></div>
+      </div>
+    </div>
 
     <div id="assignBox" class="hidden">
       <div class="card">
@@ -83,6 +111,7 @@ const $ = id => document.getElementById(id);
 let pass = "";
 try { pass = sessionStorage.getItem("nq_tcode") || ""; } catch (e) {}
 let tab = "pending";
+let hbStarted = false, teacherName = "", liveRoom = null;
 const TAGS = ["غنّة", "مدّ", "قلقلة", "إخفاء", "إدغام", "إقلاب", "ترقيق الراء", "تفخيم", "مخارج الحروف", "خطأ في الحفظ", "الوقف والابتداء"];
 
 const tApi = (path, opts = {}) => api(path, { ...opts, headers: { "x-teacher-code": pass } });
@@ -92,9 +121,11 @@ async function login(p) {
   try {
     const me = await tApi("/api/me");
     $("teacherName").textContent = me.name;
+    teacherName = me.name;
     try { sessionStorage.setItem("nq_tcode", pass); } catch (e) {}
     $("loginBox").classList.add("hidden"); $("app").classList.remove("hidden");
     show(tab);
+    if (!hbStarted) { hbStarted = true; startHeartbeat(tPing); }
   } catch (e) {
     $("loginMsg").innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
   }
@@ -111,10 +142,11 @@ document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
 
 function show(t) {
   tab = t;
-  $("recList").classList.toggle("hidden", t === "students" || t === "assign");
+  $("recList").classList.toggle("hidden", t === "students" || t === "assign" || t === "live");
+  $("liveTab").classList.toggle("hidden", t !== "live");
   $("studentsBox").classList.toggle("hidden", t !== "students");
   $("assignBox").classList.toggle("hidden", t !== "assign");
-  if (t === "students") loadStudents(); else if (t === "assign") loadAssign(); else loadRecs(t === "pending" ? "pending" : "done");
+  if (t === "students") loadStudents(); else if (t === "assign") loadAssign(); else if (t === "live") tPing(); else loadRecs(t === "pending" ? "pending" : "done");
 }
 
 // ---------- التسجيلات ----------
@@ -203,6 +235,66 @@ $("addBtn").onclick = async () => {
   $("addBtn").disabled = false;
 };
 $("newName").onkeydown = e => { if (e.key === "Enter") $("addBtn").click(); };
+
+// ---------- المباشر + من المتصل ----------
+
+async function tPing() {
+  try {
+    const d = await tApi("/api/ping", { method: "POST" });
+    const on = d.students.filter(s => s.online).length;
+    $("onlineCount").textContent = on ? `🟢 ${on}` : "";
+    $("onlineSummary").textContent = `${on} متصل من ${d.students.length}`;
+    $("presenceList").innerHTML = d.students.length ? d.students
+      .sort((a, b) => (b.online - a.online) || a.name.localeCompare(b.name, "ar"))
+      .map(s => `<div class="stu"><span>${dot(s.online)} ${esc(s.name)}</span><span title="${s.push ? "التنبيهات مفعّلة" : "لم يفعّل التنبيهات"}">${s.push ? "🔔" : "🔕"}</span></div>`).join("")
+      : `<p class="hint">أضف تلاميذك من تبويب «التلاميذ».</p>`;
+    $("currentAnn").innerHTML = d.announcement
+      ? `<div class="announce">الإعلان الحالي: ${esc(d.announcement)}<div class="hint">${timeAgo(d.announced_at)}</div></div>` : "";
+    renderLive(d.live);
+  } catch (e) { /* نتجاهل أخطاء النبضة المؤقتة */ }
+}
+
+function renderLive(live) {
+  liveRoom = live ? live.room : null;
+  $("liveState").innerHTML = live
+    ? `<div class="live-box"><b>🔴 الحصة جارية</b> <span class="hint">بدأت ${timeAgo(live.started_at)}</span>
+         <button class="live-btn" id="tJoin">ادخل إلى الحصة</button>
+         <button class="secondary full" id="tEnd">إنهاء الحصة</button></div>`
+    : `<button class="live-btn" id="tStart">🔴 ابدأ الحصة الآن وأعلم التلاميذ</button>`;
+  if (live) {
+    $("tJoin").onclick = () => window.open(jitsiUrl(live.room, teacherName), "_blank");
+    $("tEnd").onclick = async () => {
+      if (!confirm("إنهاء الحصة؟ سيختفي زر الدخول عند التلاميذ.")) return;
+      try { await tApi("/api/live", { method: "POST", body: { action: "end" } }); tPing(); } catch (e) { alert(e.message); }
+    };
+  } else {
+    $("tStart").onclick = async () => {
+      if (!confirm("بدء الحصة الآن؟ سيصل إشعار لكل تلاميذك.")) return;
+      $("tStart").disabled = true;
+      try {
+        const r = await tApi("/api/live", { method: "POST", body: { action: "start" } });
+        window.open(jitsiUrl(r.room, teacherName), "_blank");
+        $("announceMsg").innerHTML = `<div class="msg ok">بدأت الحصة. وصل الإشعار إلى ${r.sent} جهاز (من ${r.students} تلميذ).</div>`;
+        tPing();
+      } catch (e) { alert(e.message); $("tStart").disabled = false; }
+    };
+  }
+}
+
+$("announceBtn").onclick = async () => {
+  const text = $("announceText").value.trim(); if (!text) return;
+  $("announceBtn").disabled = true;
+  try {
+    const r = await tApi("/api/live", { method: "POST", body: { action: "announce", text } });
+    $("announceMsg").innerHTML = `<div class="msg ok">أُرسل الإعلان. وصل إشعار إلى ${r.sent} جهاز من ${r.students} تلميذ، والباقون يرونه عند فتح الموقع.</div>`;
+    $("announceText").value = ""; tPing();
+  } catch (e) { $("announceMsg").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+  $("announceBtn").disabled = false;
+};
+$("clearAnnBtn").onclick = async () => {
+  try { await tApi("/api/live", { method: "POST", body: { action: "clear" } }); $("announceMsg").innerHTML = ""; tPing(); }
+  catch (e) { alert(e.message); }
+};
 
 // ---------- الواجبات ----------
 $("aSurah").innerHTML = SURAHS.map((n, i) => `<option value="${i + 1}">${i + 1}. ${n}</option>`).join("");
