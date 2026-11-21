@@ -48,6 +48,24 @@
         للأمان: من إعدادات الغرفة في Jitsi فعّل <b>«غرفة الانتظار» (Lobby)</b> لتقبل كل تلميذ بنفسك.</p>
       </div>
       <div class="card">
+        <h2>لوحة العرض 📖</h2>
+        <p class="hint">اختر الآيات فتظهر عند كل تلاميذك. اضغط على أي آية لتلوينها عند الجميع.</p>
+        <select id="bSurah"></select>
+        <div class="row">
+          <div><label>من الآية</label><input id="bFrom" type="number" min="1"></div>
+          <div><label>إلى الآية</label><input id="bTo" type="number" min="1"></div>
+        </div>
+        <button class="full" id="bShow">📖 اعرض للتلاميذ</button>
+        <div id="bMsg"></div>
+        <div id="bBoard"></div>
+        <div class="board-nav hidden" id="bNav">
+          <button class="secondary" id="bNext">التالية ◀</button>
+          <button class="secondary" id="bPrev">▶ السابقة</button>
+          <button class="danger" id="bHide" style="flex:0;white-space:nowrap">إخفاء</button>
+        </div>
+      </div>
+
+      <div class="card">
         <h2>إعلام التلاميذ بموعد</h2>
         <textarea id="announceText" placeholder="مثال: الحصة المباشرة اليوم على الساعة 18:00 إن شاء الله، حضّروا سورة الملك"></textarea>
         <div class="row" style="margin-top:10px">
@@ -251,6 +269,8 @@ async function tPing() {
     $("currentAnn").innerHTML = d.announcement
       ? `<div class="announce">الإعلان الحالي: ${esc(d.announcement)}<div class="hint">${timeAgo(d.announced_at)}</div></div>` : "";
     renderLive(d.live);
+    if (d.board && !boardBusy) { board = d.board; showBoard(); }
+    else if (!d.board && board && !boardBusy) { board = null; showBoard(); }
   } catch (e) { /* نتجاهل أخطاء النبضة المؤقتة */ }
 }
 
@@ -280,6 +300,46 @@ function renderLive(live) {
     };
   }
 }
+
+// ---------- لوحة العرض ----------
+let board = null, boardBusy = false;
+$("bSurah").innerHTML = SURAHS.map((n, i) => `<option value="${i + 1}">${i + 1}. ${n}</option>`).join("");
+
+function showBoard() {
+  $("bNav").classList.toggle("hidden", !board);
+  if (!board) { $("bBoard").innerHTML = ""; $("bBoard").dataset.key = ""; return; }
+  renderBoard($("bBoard"), board, n => setCurrent(n));
+}
+
+async function sendBoard(b) {
+  boardBusy = true;
+  try { await tApi("/api/live", { method: "POST", body: { action: "board", ...b } }); $("bMsg").innerHTML = ""; }
+  catch (e) { $("bMsg").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+  boardBusy = false;
+}
+
+async function setCurrent(n) {
+  if (!board) return;
+  board = { ...board, current: n };
+  showBoard();                 // نلوّن فورًا عند الأستاذ
+  await sendBoard(board);      // ثم نرسل للتلاميذ
+}
+
+$("bShow").onclick = async () => {
+  const surah = parseInt($("bSurah").value, 10), from = parseInt($("bFrom").value, 10);
+  const to = parseInt($("bTo").value, 10) || from;
+  if (!from) { $("bMsg").innerHTML = `<div class="msg err">حدد رقم الآية الأولى</div>`; return; }
+  board = { surah, from, to, current: from };
+  $("bBoard").dataset.key = "";
+  showBoard();
+  await sendBoard(board);
+};
+$("bNext").onclick = () => board && setCurrent(Math.min(board.to, Number(board.current) + 1));
+$("bPrev").onclick = () => board && setCurrent(Math.max(board.from, Number(board.current) - 1));
+$("bHide").onclick = async () => {
+  board = null; showBoard();
+  try { await tApi("/api/live", { method: "POST", body: { action: "board_clear" } }); } catch (e) {}
+};
 
 $("announceBtn").onclick = async () => {
   const text = $("announceText").value.trim(); if (!text) return;

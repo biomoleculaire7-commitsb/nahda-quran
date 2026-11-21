@@ -80,3 +80,42 @@ function startHeartbeat(fn, every = 30000) {
   document.addEventListener("visibilitychange", run);
   return () => clearInterval(timer);
 }
+
+// ---------- لوحة العرض ----------
+// ترسم الآيات، وتلوّن الآية الحالية، وتجعل كل آية قابلة للضغط (عند الأستاذ)
+async function renderBoard(el, board, onPick) {
+  const key = `${board.surah}:${board.from}:${board.to}`;
+  if (el.dataset.key !== key) {
+    el.dataset.key = key;
+    el.innerHTML = `<div class="hint">جارٍ تحميل الآيات…</div>`;
+    let ayat;
+    try { ayat = await warshAyat(board.surah, board.from, board.to); }
+    catch (e) { el.dataset.key = ""; el.innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
+    el.innerHTML = "";
+    const title = document.createElement("div");
+    title.className = "board-title";
+    title.textContent = `سورة ${SURAHS[board.surah - 1]}`;
+    const body = document.createElement("div");
+    body.className = "quran board";
+    for (const v of ayat) {
+      const span = document.createElement("span");
+      span.className = "ayah"; span.dataset.n = v.n;
+      span.append(v.t + " ");
+      const n = document.createElement("span"); n.className = "n"; n.textContent = `﴿${toArabicDigits(v.n)}﴾`;
+      span.append(n);
+      if (onPick) { span.style.cursor = "pointer"; span.onclick = () => onPick(v.n); }
+      body.append(span, " ");
+    }
+    el.append(title, body);
+  }
+  let curEl = null;
+  el.querySelectorAll(".ayah").forEach(a => {
+    const on = Number(a.dataset.n) === Number(board.current);
+    a.classList.toggle("cur", on);
+    if (on) curEl = a;
+  });
+  if (curEl && el.dataset.cur !== String(board.current)) {
+    el.dataset.cur = String(board.current);
+    curEl.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+}

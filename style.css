@@ -53,3 +53,10 @@ footer { text-align:center; color:var(--muted); font-size:12px; padding:20px; }
 .pill { display:inline-block; font-size:12px; padding:2px 8px; border-radius:20px; background:#f1eee6; color:var(--muted); }
 .stu { display:flex; align-items:center; justify-content:space-between; padding:9px 0; border-top:1px solid var(--line); }
 .stu:first-child { border-top:none; }
+.board-title { text-align:center; font-weight:700; color:var(--accent); margin-top:12px; }
+.quran.board { font-size:28px; line-height:2.4; max-height:60vh; overflow-y:auto; }
+.quran.board.big { font-size:36px; }
+.ayah { border-radius:8px; padding:2px 4px; transition:background .3s; }
+.ayah.cur { background:#ffe9a8; box-shadow:0 0 0 2px #e0b84a; -webkit-box-decoration-break:clone; box-decoration-break:clone; }
+.board-nav { display:flex; gap:8px; margin-top:10px; }
+.board-nav button { flex:1; }

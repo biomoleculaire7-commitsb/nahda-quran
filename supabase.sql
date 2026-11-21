@@ -93,5 +93,12 @@ create table if not exists settings (
 alter table push_subscriptions enable row level security;
 alter table settings enable row level security;
 
+-- لوحة العرض
+alter table teachers
+  add column if not exists board_surah int,
+  add column if not exists board_from int,
+  add column if not exists board_to int,
+  add column if not exists board_current int,
+  add column if not exists board_updated_at timestamptz;
 
 notify pgrst, 'reload schema';

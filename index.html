@@ -45,6 +45,13 @@
       <div id="teacherStatus" class="hint">…</div>
       <div id="announceBox"></div>
       <div id="liveBox"></div>
+      <div id="boardWrap" class="hidden">
+        <div class="row" style="align-items:center;margin-top:12px">
+          <b style="color:var(--accent)">📖 الآيات المعروضة الآن</b>
+          <button class="secondary" id="bigBtn" style="flex:0;white-space:nowrap;padding:6px 10px">🔍 تكبير</button>
+        </div>
+        <div id="sBoard"></div>
+      </div>
       <div id="pushBox" style="margin-top:12px"></div>
     </div>
 
@@ -250,10 +257,13 @@ async function ping() {
     $("teacherStatus").innerHTML = `${dot(d.teacher.online)} ${esc(d.teacher.name)} — ${d.teacher.online ? "<b style='color:#22a447'>متصل الآن</b>" : "غير متصل"}`;
     $("announceBox").innerHTML = d.announcement
       ? `<div class="announce">📢 ${esc(d.announcement)}<div class="hint">${timeAgo(d.announced_at)}</div></div>` : "";
+    applyBoard(d.board);
+    manageBoardPolling(d.live || d.board);
     if (d.live) {
+      if ($("joinBtn") && $("joinBtn").dataset.room === d.live.room) { lastLiveRoom = d.live.room; return; }   // لا نعيد رسم الزر كل مرة
       $("liveBox").innerHTML = `<div class="live-box"><b>🔴 الحصة بدأت الآن</b>
         <div class="hint">انتظر حتى يسمح لك الأستاذ بالدخول</div>
-        <button class="live-btn" id="joinBtn">انضم إلى الحصة</button></div>`;
+        <button class="live-btn" id="joinBtn" data-room="${esc(d.live.room)}">انضم إلى الحصة</button></div>`;
       $("joinBtn").onclick = () => window.open(jitsiUrl(d.live.room, d.me), "_blank");
       if (lastLiveRoom !== d.live.room && lastLiveRoom !== null) $("liveCard").scrollIntoView({ behavior: "smooth" });
       lastLiveRoom = d.live.room;
@@ -264,6 +274,32 @@ async function ping() {
     $("teacherStatus").textContent = e.message;
   }
 }
+
+// ---------- لوحة العرض (تتحدّث كل 4 ثوانٍ أثناء الحصة) ----------
+let boardTimer = null;
+function applyBoard(b) {
+  $("boardWrap").classList.toggle("hidden", !b);
+  if (!b) { $("sBoard").innerHTML = ""; $("sBoard").dataset.key = ""; return; }
+  renderBoard($("sBoard"), b, null);
+}
+function manageBoardPolling(active) {
+  if (active && !boardTimer) {
+    boardTimer = setInterval(async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const d = await api(`/api/ping?code=${encodeURIComponent(code)}`);
+        applyBoard(d.board);
+        if (!d.live && !d.board) manageBoardPolling(false);
+      } catch (e) {}
+    }, 4000);
+  } else if (!active && boardTimer) {
+    clearInterval(boardTimer); boardTimer = null;
+  }
+}
+$("bigBtn").onclick = () => {
+  const q = $("sBoard").querySelector(".quran");
+  if (q) { q.classList.toggle("big"); $("bigBtn").textContent = q.classList.contains("big") ? "🔍 تصغير" : "🔍 تكبير"; }
+};
 
 // ---------- الإشعارات ----------
 const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
