@@ -139,6 +139,7 @@ async function loadRecs(status) {
           <button data-ok="${r.id}">صحيحة ✓</button>
           <button class="danger" data-redo="${r.id}">تحتاج إعادة</button>
         </div>
+        <button class="secondary full" data-rdel="${r.id}">🗑️ حذف التسجيل</button>
       </div>`).join("");
   } catch (e) {
     $("recList").innerHTML = `<div class="card msg err">${esc(e.message)}</div>`;
@@ -150,6 +151,17 @@ $("recList").addEventListener("click", async e => {
   if (b.dataset.tag) {
     const ta = document.querySelector(`[data-note="${b.dataset.tag}"]`);
     ta.value = (ta.value ? ta.value.trim() + "، " : "") + b.textContent;
+    return;
+  }
+  if (b.dataset.rdel) {
+    if (!confirm("حذف هذا التسجيل نهائيًا؟")) return;
+    b.disabled = true;
+    try {
+      await tApi(`/api/recordings?id=${b.dataset.rdel}`, { method: "DELETE" });
+      $(`r-${b.dataset.rdel}`).remove();
+      if (!document.querySelector("#recList .card[id]"))
+        $("recList").innerHTML = `<div class="card hint">لا توجد تسجيلات.</div>`;
+    } catch (err) { alert(err.message); b.disabled = false; }
     return;
   }
   const id = b.dataset.ok || b.dataset.redo;
