@@ -99,3 +99,50 @@ export async function removeAudioOf(studentIds) {
   const paths = (data || []).map(r => r.audio_path);
   for (let i = 0; i < paths.length; i += 500) await db.storage.from(BUCKET).remove(paths.slice(i, i + 500));
 }
+
+// ---------- من المتصل ----------
+export const ONLINE_SECONDS = 70;
+export const isOnline = ts => Boolean(ts) && (Date.now() - new Date(ts).getTime()) < ONLINE_SECONDS * 1000;
+export const LIVE_HOURS = 3;   // الحصة تنتهي تلقائيًا بعد 3 ساعات إن نسي الأستاذ إنهاءها
+export const liveActive = t => Boolean(t?.live_room) && t.live_started_at &&
+  (Date.now() - new Date(t.live_started_at).getTime()) < LIVE_HOURS * 3600_000;
+export const randomToken = n =>
+  Array.from({ length: n }, () => ALPHABET[crypto.randomInt(ALPHABET.length)]).join('');
+
+// ---------- الإشعارات (Web Push) ----------
+// المفاتيح تُولَّد تلقائيًا أول مرة وتُحفظ في جدول settings، فلا حاجة لإعداد شيء
+import webpush from 'web-push';
+let _vapid = null;
+export async function vapid(host) {
+  if (!_vapid) {
+    let { data } = await db.from('settings').select('value').eq('key', 'vapid').maybeSingle();
+    if (!data) {
+      await db.from('settings').insert({ key: 'vapid', value: webpush.generateVAPIDKeys() });
+      ({ data } = await db.from('settings').select('value').eq('key', 'vapid').maybeSingle());
+    }
+    _vapid = data.value;
+  }
+  const subject = process.env.VAPID_SUBJECT || (host ? `https://${host}` : 'mailto:admin@example.com');
+  webpush.setVapidDetails(subject, _vapid.publicKey, _vapid.privateKey);
+  return _vapid;
+}
+
+export async function pushToStudents(studentIds, payload, host) {
+  if (!studentIds.length) return { sent: 0, total: 0 };
+  await vapid(host);
+  const { data: subs } = await db.from('push_subscriptions')
+    .select('id,endpoint,p256dh,auth').in('student_id', studentIds);
+  let sent = 0; const dead = [];
+  await Promise.all((subs || []).map(async s => {
+    try {
+      await webpush.sendNotification(
+        { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
+        JSON.stringify(payload), { TTL: 3600, urgency: 'high' });
+      sent++;
+    } catch (e) {
+      if (e.statusCode === 404 || e.statusCode === 410) dead.push(s.id);   // اشتراك منتهي
+    }
+  }));
+  if (dead.length) await db.from('push_subscriptions').delete().in('id', dead);
+  return { sent, total: (subs || []).length };
+}
