@@ -25,6 +25,7 @@
     <input id="codeInput" inputmode="numeric" maxlength="6" placeholder="مثال: 482915">
     <button class="full" id="loginBtn">دخول</button>
     <div id="loginMsg"></div>
+    <p class="hint" style="text-align:center;margin-top:14px">أستاذ؟ <a href="teacher.html" style="color:var(--accent);font-weight:700">ادخل من صفحة الأستاذ</a></p>
   </section>
 
   <section id="app" class="hidden">
@@ -33,6 +34,12 @@
         <div>السلام عليكم يا <b id="studentName"></b><div class="hint" id="teacherLine"></div></div>
         <button class="secondary" id="logoutBtn" style="flex:0">خروج</button>
       </div>
+    </div>
+
+    <!-- الواجبات -->
+    <div class="card" id="assignCard">
+      <h2>واجباتي</h2>
+      <div id="assignList"><p class="hint">جارٍ التحميل…</p></div>
     </div>
 
     <!-- التسجيل -->
@@ -91,6 +98,7 @@ async function login(c) {
     $("studentName").textContent = name;
     $("loginBox").classList.add("hidden");
     $("app").classList.remove("hidden");
+    loadAssignments();
     loadMine();
   } catch (e) {
     if (!/انتظر/.test(e.message)) store("nq_code", null);
@@ -193,7 +201,55 @@ async function loadMine() {
     $("myList").innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
   }
 }
-$("refreshBtn").onclick = loadMine;
+$("refreshBtn").onclick = () => { loadAssignments(); loadMine(); };
+
+// ---------- الواجبات ----------
+let assignments = [];
+async function loadAssignments() {
+  try {
+    assignments = await api(`/api/assignments?code=${encodeURIComponent(code)}`);
+    if (!assignments.length) { $("assignList").innerHTML = `<p class="hint">لا توجد واجبات حاليًا.</p>`; return; }
+    $("assignList").innerHTML = assignments.map((a, i) => `
+      <div class="item">
+        <b>${esc(surahLabel(a))}</b>
+        <div class="hint">${new Date(a.created_at).toLocaleDateString("ar-DZ")}</div>
+        ${a.note ? `<div class="note">${esc(a.note)}</div>` : ""}
+        <div class="row" style="margin-top:8px">
+          <button class="secondary" data-show="${i}">📖 اعرض الآيات</button>
+          <button data-rec="${i}">🎙️ سجّل الواجب</button>
+        </div>
+        <div class="quran hidden" id="q-${i}"></div>
+      </div>`).join("");
+  } catch (e) {
+    $("assignList").innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
+  }
+}
+
+$("assignList").addEventListener("click", async e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.show !== undefined) {
+    const i = b.dataset.show, a = assignments[i], box = $(`q-${i}`);
+    if (!box.classList.contains("hidden")) { box.classList.add("hidden"); return; }
+    box.classList.remove("hidden");
+    box.textContent = "جارٍ تحميل الآيات…";
+    try {
+      const ayat = await warshAyat(a.surah, a.ayah_from, a.ayah_to);
+      box.textContent = "";
+      if (!ayat.length) { box.textContent = "لم نجد هذه الآيات، راجع أرقامها مع أستاذك."; return; }
+      for (const v of ayat) {
+        box.append(v.t + " ");
+        const n = document.createElement("span"); n.className = "n";
+        n.textContent = `﴿${toArabicDigits(v.n)}﴾`;
+        box.append(n, " ");
+      }
+    } catch (err) { box.textContent = err.message; }
+  }
+  if (b.dataset.rec !== undefined) {
+    const a = assignments[b.dataset.rec];
+    $("surah").value = a.surah; $("from").value = a.ayah_from; $("to").value = a.ayah_to;
+    $("recBtn").scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+});
 </script>
 </body>
 </html>

@@ -33,10 +33,33 @@
     <div class="tabs">
       <button data-tab="pending" class="active">بانتظار التصحيح</button>
       <button data-tab="done">المصحَّحة</button>
+      <button data-tab="assign">الواجبات</button>
       <button data-tab="students">التلاميذ</button>
     </div>
 
     <div id="recList"></div>
+
+    <div id="assignBox" class="hidden">
+      <div class="card">
+        <h2>واجب جديد</h2>
+        <label>لمن؟</label>
+        <select id="aStudent"><option value="">كل تلاميذي</option></select>
+        <label>السورة</label>
+        <select id="aSurah"></select>
+        <div class="row">
+          <div><label>من الآية</label><input id="aFrom" type="number" min="1"></div>
+          <div><label>إلى الآية</label><input id="aTo" type="number" min="1"></div>
+        </div>
+        <label>ملاحظة (اختياري)</label>
+        <input id="aNote" placeholder="مثال: انتبه للمدود">
+        <button class="full" id="aAdd">إرسال الواجب</button>
+        <p class="hint">أرقام الآيات حسب ترقيم مصحف ورش.</p>
+        <div id="aMsg"></div>
+        <button class="secondary full" id="aPreview">📖 معاينة الآيات قبل الإرسال</button>
+        <div class="quran hidden" id="aText"></div>
+      </div>
+      <div class="card"><h2>الواجبات المرسلة</h2><div id="aList"></div></div>
+    </div>
 
     <div id="studentsBox" class="hidden">
       <div class="card">
@@ -88,9 +111,10 @@ document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
 
 function show(t) {
   tab = t;
-  $("recList").classList.toggle("hidden", t === "students");
+  $("recList").classList.toggle("hidden", t === "students" || t === "assign");
   $("studentsBox").classList.toggle("hidden", t !== "students");
-  if (t === "students") loadStudents(); else loadRecs(t === "pending" ? "pending" : "done");
+  $("assignBox").classList.toggle("hidden", t !== "assign");
+  if (t === "students") loadStudents(); else if (t === "assign") loadAssign(); else loadRecs(t === "pending" ? "pending" : "done");
 }
 
 // ---------- التسجيلات ----------
@@ -167,6 +191,62 @@ $("addBtn").onclick = async () => {
   $("addBtn").disabled = false;
 };
 $("newName").onkeydown = e => { if (e.key === "Enter") $("addBtn").click(); };
+
+// ---------- الواجبات ----------
+$("aSurah").innerHTML = SURAHS.map((n, i) => `<option value="${i + 1}">${i + 1}. ${n}</option>`).join("");
+
+async function loadAssign() {
+  try {
+    const studs = await tApi("/api/students");
+    const cur = $("aStudent").value;
+    $("aStudent").innerHTML = `<option value="">كل تلاميذي</option>` +
+      studs.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("");
+    $("aStudent").value = cur;
+    const list = await tApi("/api/assignments");
+    $("aList").innerHTML = list.length ? list.map(a => `
+      <div class="item row" style="align-items:center">
+        <div><b>${esc(surahLabel(a))}</b><br>
+          <span class="hint">${a.student ? esc(a.student) : "كل التلاميذ"} · ${new Date(a.created_at).toLocaleDateString("ar-DZ")}</span>
+          ${a.note ? `<div class="hint">${esc(a.note)}</div>` : ""}</div>
+        <button class="danger" style="flex:0" data-adel="${a.id}">حذف</button>
+      </div>`).join("") : `<p class="hint">لم تُرسَل واجبات بعد.</p>`;
+  } catch (e) { $("aList").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+}
+
+$("aAdd").onclick = async () => {
+  $("aAdd").disabled = true; $("aMsg").innerHTML = "";
+  try {
+    await tApi("/api/assignments", { method: "POST", body: {
+      student_id: $("aStudent").value || null, surah: $("aSurah").value,
+      from: $("aFrom").value, to: $("aTo").value, note: $("aNote").value } });
+    $("aMsg").innerHTML = `<div class="msg ok">أُرسل الواجب.</div>`;
+    $("aNote").value = ""; loadAssign();
+  } catch (e) { $("aMsg").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+  $("aAdd").disabled = false;
+};
+
+$("aPreview").onclick = async () => {
+  const box = $("aText"), f = parseInt($("aFrom").value, 10), t = parseInt($("aTo").value, 10) || f;
+  box.classList.remove("hidden");
+  if (!f) { box.textContent = "حدد رقم الآية أولًا."; return; }
+  box.textContent = "جارٍ التحميل…";
+  try {
+    const ayat = await warshAyat(parseInt($("aSurah").value, 10), f, t);
+    box.textContent = ayat.length ? "" : "لم نجد هذه الآيات.";
+    for (const v of ayat) {
+      box.append(v.t + " ");
+      const n = document.createElement("span"); n.className = "n"; n.textContent = `﴿${toArabicDigits(v.n)}﴾`;
+      box.append(n, " ");
+    }
+  } catch (e) { box.textContent = e.message; }
+};
+
+$("aList").addEventListener("click", async e => {
+  const b = e.target.closest("[data-adel]"); if (!b) return;
+  if (!confirm("حذف هذا الواجب؟")) return;
+  try { await tApi(`/api/assignments?id=${b.dataset.adel}`, { method: "DELETE" }); loadAssign(); }
+  catch (err) { alert(err.message); }
+});
 
 $("studentList").addEventListener("click", async e => {
   const b = e.target.closest("[data-del]"); if (!b) return;

@@ -25,3 +25,25 @@ async function api(path, { method = "GET", body, headers = {} } = {}) {
   if (!r.ok) throw new Error(data.error || "حدث خطأ، حاول مرة أخرى");
   return data;
 }
+
+// ---------- نص ورش (مجمع الملك فهد، عبر fawazahmed0/quran-api) ----------
+const WARSH_BASE = "https://cdn.jsdelivr.net/gh/fawazahmed0/quran-api@1/editions/ara-quranwarsh";
+const _warshCache = {};
+async function warshChapter(surah) {
+  if (_warshCache[surah]) return _warshCache[surah];
+  let data = null;
+  for (const url of [`${WARSH_BASE}/${surah}.min.json`, `${WARSH_BASE}/${surah}.json`]) {
+    try { const r = await fetch(url); if (r.ok) { data = await r.json(); break; } } catch (e) {}
+  }
+  if (!data) throw new Error("تعذّر تحميل نص الآيات، تحقق من الإنترنت");
+  const list = Array.isArray(data) ? data : (data.chapter || data.verses || data.quran || []);
+  const verses = list.map(v => ({ n: Number(v.verse ?? v.verse_number ?? v.number), t: String(v.text ?? "") }))
+                     .filter(v => v.n && v.t);
+  if (!verses.length) throw new Error("صيغة نص الآيات غير متوقعة");
+  return (_warshCache[surah] = verses);
+}
+async function warshAyat(surah, from, to) {
+  const all = await warshChapter(surah);
+  return all.filter(v => v.n >= from && v.n <= (to || from));
+}
+const toArabicDigits = n => String(n).replace(/\d/g, d => "٠١٢٣٤٥٦٧٨٩"[d]);
