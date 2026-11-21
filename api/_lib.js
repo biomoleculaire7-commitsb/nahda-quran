@@ -5,8 +5,13 @@ export const BUCKET = 'recitations';
 const MAX_FAILS = 10;      // عدد المحاولات الخاطئة المسموح بها
 const WINDOW_MIN = 15;     // خلال كم دقيقة
 
+// تنظيف الرابط: نقبل فقط https://xxxx.supabase.co (بدون /rest/v1 أو / في الآخر)
+const SUPABASE_URL = String(process.env.SUPABASE_URL || '').trim()
+  .replace(/\/(rest|storage|auth)\/v1.*$/, '')
+  .replace(/\/+$/, '');
+
 export const db = createClient(
-  process.env.SUPABASE_URL,
+  SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY,
   { auth: { persistSession: false } }
 );
